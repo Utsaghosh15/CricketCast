@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: criccast-postgres
+    environment:
+      POSTGRES_USER: criccast
+      POSTGRES_PASSWORD: criccast
+      POSTGRES_DB: criccast
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U criccast -d criccast"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - criccast-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: criccast-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - criccast-network
+
+  criccast-backend:
+    build: .
+    container_name: criccast-backend
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgresql://criccast:criccast@postgres:5432/criccast
+      REDIS_URL: redis://redis:6379
+      ADMIN_SECRET: ${ADMIN_SECRET:-change_me_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - criccast-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  criccast-network:
+    name: criccast-network

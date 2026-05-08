@@ -1,0 +1,47 @@
+# CricCast — MediaMTX: Larix RTMP ingest → WebRTC (WHEP) + low-latency HLS
+#
+# Docker (from repo root CricketCast/):
+#   docker run --rm \
+#     -p 1935:1935 \
+#     -p 8888:8888 \
+#     -p 8889:8889 \
+#     -p 8189:8189/udp \
+#     -v "$PWD/mediamtx.yml:/mediamtx.yml:ro" \
+#     bluenviron/mediamtx:latest
+#
+# Larix publish:  rtmp://<LAN_IP>:1935/live/<streamKey>
+# Viewer WHEP:    http://<LAN_IP>:8889/live/<streamKey>/whep   (paste into CricCast setup)
+# HLS fallback:   http://<LAN_IP>:8888/live/<streamKey>/index.m3u8
+#
+# For iPhone/other devices on Wi‑Fi, set webrtcAdditionalHosts to your Mac LAN IP
+# so ICE candidates are reachable (see below).
+
+logLevel: info
+
+rtmp: true
+rtmpAddress: :1935
+
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: ['*']
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsAlwaysRemux: true
+hlsMuxerCloseAfter: 60s
+
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: true
+# Add your Mac LAN IP so WebRTC works from phones (e.g. ['192.168.200.11'])
+webrtcAdditionalHosts: [192.168.1.163]
+
+pathDefaults:
+  source: publisher
+
+paths:
+  all_others:

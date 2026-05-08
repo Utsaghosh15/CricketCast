@@ -1,0 +1,18 @@
+const { Pool } = require('pg');
+require('dotenv').config();
+
+/**
+ * Shared PostgreSQL connection pool for the application.
+ * @type {import('pg').Pool}
+ */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,
+  idleTimeoutMillis: 30000,
+});
+
+pool.on('error', (err) => {
+  console.error('[db] Unexpected pool error', err);
+});
+
+module.exports = { pool };
