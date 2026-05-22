@@ -1,16 +1,16 @@
 import { useState } from 'react'
 
 const BUTTONS = [
-  { label: 'Batting scorecard', type: 'BATTING_SCORECARD' },
-  { label: 'Bowling figures', type: 'BOWLING_FIGURES' },
-  { label: 'Player card — Bat', type: 'PLAYER_CARD_BATSMAN' },
-  { label: 'Player card — Bowl', type: 'PLAYER_CARD_BOWLER' },
-  { label: 'Team lineup — T1', type: 'TEAM_LINEUP', options: { team: 'team1' } },
-  { label: 'Team lineup — T2', type: 'TEAM_LINEUP', options: { team: 'team2' } },
-  { label: 'Umpires', type: 'UMPIRES_CARD' },
-  { label: 'Partnership', type: 'PARTNERSHIP' },
-  { label: 'Required runs', type: 'REQUIRED_RUNS' },
-  { label: 'Custom message', type: 'CUSTOM_MESSAGE', isCustom: true },
+  { key: 'BATTING_SCORECARD', label: 'Batting scorecard', type: 'BATTING_SCORECARD' },
+  { key: 'BOWLING_FIGURES', label: 'Bowling figures', type: 'BOWLING_FIGURES' },
+  { key: 'PLAYER_CARD_BATSMAN', label: 'Player card — Bat', type: 'PLAYER_CARD_BATSMAN' },
+  { key: 'PLAYER_CARD_BOWLER', label: 'Player card — Bowl', type: 'PLAYER_CARD_BOWLER' },
+  { key: 'TEAM_LINEUP_T1', label: 'Team lineup — T1', type: 'TEAM_LINEUP', options: { team: 'team1' } },
+  { key: 'TEAM_LINEUP_T2', label: 'Team lineup — T2', type: 'TEAM_LINEUP', options: { team: 'team2' } },
+  { key: 'UMPIRES_CARD', label: 'Umpires', type: 'UMPIRES_CARD' },
+  { key: 'PARTNERSHIP', label: 'Partnership', type: 'PARTNERSHIP' },
+  { key: 'REQUIRED_RUNS', label: 'Required runs', type: 'REQUIRED_RUNS' },
+  { key: 'CUSTOM_MESSAGE', label: 'Custom message', type: 'CUSTOM_MESSAGE', isCustom: true },
 ]
 
 export default function ManualOverlayPanel({ postOverlay }) {
@@ -20,16 +20,16 @@ export default function ManualOverlayPanel({ postOverlay }) {
   const [customText, setCustomText] = useState('')
   const [customDur, setCustomDur] = useState(6)
 
-  const flashOk = (type) => {
-    setOk(type)
+  const flashOk = (btnKey) => {
+    setOk(btnKey)
     window.setTimeout(() => setOk(null), 1200)
   }
 
-  const send = async (type, extra = {}) => {
-    setLoading(type)
+  const send = async (type, extra = {}, btnKey = type) => {
+    setLoading(btnKey)
     try {
       await postOverlay(type, extra)
-      flashOk(type)
+      flashOk(btnKey)
     } catch (e) {
       alert(e?.response?.data?.error || e.message)
     } finally {
@@ -39,7 +39,7 @@ export default function ManualOverlayPanel({ postOverlay }) {
 
   const onCustom = async () => {
     if (!customText.trim()) return
-    await send('CUSTOM_MESSAGE', { message: customText.trim(), duration: customDur })
+    await send('CUSTOM_MESSAGE', { message: customText.trim(), duration: customDur }, 'CUSTOM_MESSAGE')
     setCustomOpen(false)
     setCustomText('')
   }
@@ -50,15 +50,17 @@ export default function ManualOverlayPanel({ postOverlay }) {
       <div className="grid grid-cols-2 gap-2">
         {BUTTONS.map((b) => (
           <button
-            key={b.type}
+            key={b.key}
             type="button"
             disabled={!!loading}
-            onClick={() => (b.isCustom ? setCustomOpen(true) : send(b.type, b.options || {}))}
+            onClick={() =>
+              b.isCustom ? setCustomOpen(true) : send(b.type, b.options || {}, b.key)
+            }
             className="relative min-h-[44px] rounded-lg border border-[#1a2030] px-2 py-2 text-center text-xs font-medium text-[#e0e0e0] disabled:opacity-40"
           >
-            {loading === b.type ? (
+            {loading === b.key ? (
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#00e5ff] border-t-transparent" />
-            ) : ok === b.type ? (
+            ) : ok === b.key ? (
               <span className="text-[#00e676]">✓</span>
             ) : (
               b.label
@@ -69,7 +71,7 @@ export default function ManualOverlayPanel({ postOverlay }) {
       <button
         type="button"
         disabled={!!loading}
-        onClick={() => send('HIDE_ALL')}
+        onClick={() => send('HIDE_ALL', {}, 'HIDE_ALL')}
         className="mt-3 w-full rounded-lg bg-[#f44336]/20 py-3 text-sm font-semibold text-[#f44336] disabled:opacity-40"
       >
         {loading === 'HIDE_ALL' ? '…' : 'Hide all overlays'}

@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useLiveKitAdminRoom } from '../hooks/useLiveKitAdminRoom'
+import { useWebSocket } from '../hooks/useWebSocket'
+import { useOverlaySync } from '../hooks/useOverlaySync'
 import { useParams } from 'react-router-dom'
 import { MatchProvider, useMatch } from '../context/MatchContext'
+import { StreamProvider } from '../context/StreamContext'
 import { OverlayProvider } from '../context/OverlayContext'
 import Scoreboard from '../components/scoring/Scoreboard'
 import RunButtons from '../components/scoring/RunButtons'
@@ -11,7 +15,11 @@ import BowlerModal from '../components/scoring/BowlerModal'
 import UndoButton from '../components/scoring/UndoButton'
 import AutoOverlayToggles from '../components/overlay-controls/AutoOverlayToggles'
 import ManualOverlayPanel from '../components/overlay-controls/ManualOverlayPanel'
+import RoomGuestsAdmin from '../components/scoring/RoomGuestsAdmin'
+import AdminLiveKitPanel from '../components/scoring/AdminLiveKitPanel'
+import AdminMatchLiveFeed from '../components/scoring/AdminMatchLiveFeed'
 import { http, unwrap } from '../lib/http'
+import { adminHeaders } from '../lib/adminHeaders'
 
 function ScoringInner({ matchId }) {
   const { matchState, updateFromServer, refetch, matchLoading, matchError } = useMatch()
@@ -22,6 +30,37 @@ function ScoringInner({ matchId }) {
   const [wicketOpen, setWicketOpen] = useState(false)
   const [bowlerOpen, setBowlerOpen] = useState(false)
   const [controlModal, setControlModal] = useState(null)
+  const [lkReconnectNonce, setLkReconnectNonce] = useState(0)
+  const lk = useLiveKitAdminRoom({ matchId, enabled: true, reconnectNonce: lkReconnectNonce })
+
+  const adminWsAuth = useMemo(() => {
+    try {
+      const tok = localStorage.getItem('criccast_admin_token')?.trim()
+      if (tok) return { adminToken: tok, adminSecret: '' }
+      const s = localStorage.getItem('criccast_admin_secret')?.trim()
+      return { adminToken: '', adminSecret: s || '' }
+    } catch {
+      return { adminToken: '', adminSecret: '' }
+    }
+  }, [])
+
+  const hasAdminWsCred = !!(adminWsAuth.adminToken || adminWsAuth.adminSecret)
+
+  const overlayHandler = useOverlaySync()
+  const handleWsMessage = useCallback(
+    (msg) => {
+      overlayHandler(msg)
+    },
+    [overlayHandler]
+  )
+
+  useWebSocket({
+    matchId,
+    enabled: !!matchId && !!state && hasAdminWsCred,
+    adminToken: adminWsAuth.adminToken,
+    adminSecret: adminWsAuth.adminSecret,
+    onEvent: handleWsMessage,
+  })
 
   const postBall = useCallback(
     async (body) => {
@@ -99,13 +138,14 @@ function ScoringInner({ matchId }) {
   }
 
   const postControl = async (action) => {
+    const admin = adminHeaders()
     try {
       if (action === 'END') {
-        const res = await http.post(`/api/match/${matchId}/complete`, {})
+        const res = await http.post(`/api/match/${matchId}/complete`, {}, { headers: admin })
         updateFromServer(unwrap(res))
         alert('Match marked complete.')
       } else {
-        await http.post(`/api/match/${matchId}/break`, { action })
+        await http.post(`/api/match/${matchId}/break`, { action }, { headers: admin })
         alert('Break recorded.')
       }
     } catch (e) {
@@ -166,9 +206,16 @@ function ScoringInner({ matchId }) {
               </button>
             ))}
           </div>
+
+          <AdminMatchLiveFeed matchState={state} roomRef={lk.roomRef} connected={lk.connected} />
         </div>
 
         <div className="w-full shrink-0 space-y-4 lg:w-80">
+          <RoomGuestsAdmin matchId={matchId} />
+          <AdminLiveKitPanel
+            lk={lk}
+            onReconnectLiveKit={() => setLkReconnectNonce((n) => n + 1)}
+          />
           <AutoOverlayToggles />
           <ManualOverlayPanel postOverlay={postOverlay} />
         </div>
@@ -225,10 +272,12 @@ export default function Scoring() {
   if (!matchId) return null
 
   return (
-    <OverlayProvider>
-      <MatchProvider matchId={matchId}>
-        <ScoringInner matchId={matchId} />
-      </MatchProvider>
-    </OverlayProvider>
+    <StreamProvider>
+      <OverlayProvider>
+        <MatchProvider matchId={matchId} matchAudience="admin">
+          <ScoringInner matchId={matchId} />
+        </MatchProvider>
+      </OverlayProvider>
+    </StreamProvider>
   )
 }

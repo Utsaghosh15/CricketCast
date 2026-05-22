@@ -1,17 +1,20 @@
 # CricCast
 
-Cricket live scoring and streaming demo: dual **HLS** and **WebRTC (WHEP)** playback via **MediaMTX**, a **React** viewer with score overlays, and a **Node.js** API backed by **PostgreSQL** and **Redis**.
+Cricket live scoring and streaming: dual **HLS** and **WebRTC (WHEP)** playback via **MediaMTX**, a **React** viewer with score overlays, optional **LiveKit** fan cam and room guests, and a **Node.js** API backed by **PostgreSQL** and **Redis**.
+
+**Repository:** [github.com/Utsaghosh15/CricketCast](https://github.com/Utsaghosh15/CricketCast)
 
 ---
 
 ## Features
 
-- **Match setup wizard** — teams, toss, stream URL / key, go live  
-- **Scoring / admin** — ball-by-ball with overlay events  
-- **Viewer** — side-by-side **HLS** (TCP 8888) and **WebRTC** (WHEP on 8889 + UDP ICE)  
-- **Playback telemetry** — live latency and transport stats in a card below the players  
-- **Live chat** — prefers **WebRTC DataChannel** (browser ↔ Node relay with `@roamhq/wrtc`); **WebSocket + Redis** fallback when the channel is not ready  
-- **Realtime** — WebSocket + Redis fan-out for scores and overlays  
+- **Match setup wizard** — teams, toss, stream URL / key, go live
+- **Scoring / admin** — ball-by-ball with overlay events; JWT admin login (`admin` / `criccast` by default)
+- **Viewer** — `/watch/:matchId` with HLS + WebRTC (WHEP), overlays, and live chat
+- **Playback telemetry** — live latency and transport stats below the players
+- **Live chat** — LiveKit data packets when connected; **WebRTC DataChannel** or **WebSocket + Redis** fallback otherwise
+- **LiveKit (optional)** — room guest invites, viewer login, fan cam PiP, admin live feed — see [`backend/LIVEKIT.md`](backend/LIVEKIT.md)
+- **Realtime** — WebSocket + Redis fan-out for scores and overlays
 
 ---
 
@@ -19,18 +22,20 @@ Cricket live scoring and streaming demo: dual **HLS** and **WebRTC (WHEP)** play
 
 | Path | Role |
 |------|------|
-| `frontend/` | Vite + React app (`npm run dev` → usually `http://localhost:5173`) |
+| `frontend/` | Vite + React app (`npm run dev` → `http://localhost:5173`) |
 | `backend/` | Express + `ws` API (`PORT` default `3001`) |
 | `mediamtx.yml` | Example MediaMTX config (RTMP ingest, HLS, WebRTC/WHEP) |
+| `backend/LIVEKIT.md` | LiveKit Cloud setup, migrations, API flow |
 
 ---
 
 ## Prerequisites
 
-- **Node.js** ≥ 18  
-- **PostgreSQL** and **Redis** (local or Docker)  
-- **MediaMTX** (binary or Docker) for real video — not started by this repo’s backend compose alone  
-- Optional: **Larix Broadcaster** (or any RTMP publisher) to push to MediaMTX  
+- **Node.js** ≥ 18
+- **PostgreSQL** and **Redis** (local or Docker via `backend/docker-compose.yml`)
+- **MediaMTX** (Docker or binary) for RTMP/HLS/WHEP video — not started by backend compose alone
+- Optional: **LiveKit Cloud** project for fan cam / room guests
+- Optional: **Larix Broadcaster** (or any RTMP publisher) to push to MediaMTX
 
 ---
 
@@ -50,7 +55,14 @@ Copy env template:
 cp backend/.env.example backend/.env
 ```
 
-Edit `backend/.env` if your Postgres/Redis URLs differ.
+Edit `backend/.env` if your Postgres/Redis URLs differ. Default Postgres: `postgresql://criccast:criccast@localhost:5432/criccast`.
+
+**Inspect tables (optional):**
+
+```bash
+cd backend
+psql "$DATABASE_URL" -c "\dt"
+```
 
 ### 2. Backend
 
@@ -60,13 +72,13 @@ npm install
 npm run dev
 ```
 
-API listens on **`http://localhost:3001`** (default). WebSocket path: **`ws://localhost:3001/ws`**.
+API: **`http://localhost:3001`**. WebSocket: **`ws://localhost:3001/ws`**.
 
 ### 3. Frontend
 
 ```bash
 cd frontend
-cp .env.example .env   # if you don’t have .env yet
+cp .env.example .env   # optional in dev — Vite proxies /api and /ws
 npm install
 npm run dev
 ```
@@ -75,7 +87,7 @@ Open **`http://localhost:5173`**.
 
 ### 4. MediaMTX (video)
 
-From the **repo root** (same folder as `mediamtx.yml`), after editing `webrtcAdditionalHosts` to **your machine’s LAN IP**:
+From the **repo root**, set `webrtcAdditionalHosts` in `mediamtx.yml` to your machine’s **LAN IP**, then:
 
 ```bash
 docker run --rm \
@@ -87,11 +99,26 @@ docker run --rm \
   bluenviron/mediamtx:latest
 ```
 
-- **Publish (Larix):** `rtmp://<LAN_IP>:1935/live/<streamKey>`  
-- **WHEP (viewer):** `http://<LAN_IP>:8889/live/<streamKey>/whep`  
-- **HLS:** `http://<LAN_IP>:8888/live/<streamKey>/index.m3u8`  
+| Use | URL |
+|-----|-----|
+| Publish (Larix) | `rtmp://<LAN_IP>:1935/live/<streamKey>` |
+| WHEP (viewer) | `http://<LAN_IP>:8889/live/<streamKey>/whep` |
+| HLS | `http://<LAN_IP>:8888/live/<streamKey>/index.m3u8` |
 
-Paste WHEP (and stream key) into match setup / stream settings in the app.
+Paste WHEP and stream key into match setup / stream settings in the app.
+
+### 5. LiveKit (optional)
+
+1. Create a project at [cloud.livekit.io](https://cloud.livekit.io).
+2. Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in `backend/.env`.
+3. If Postgres was created before room-guest tables existed:
+
+```bash
+cd backend
+psql "$DATABASE_URL" -f src/db/migrations/002_match_room_guests.sql
+```
+
+Full flow and webhook setup: **`backend/LIVEKIT.md`**.
 
 ---
 
@@ -99,15 +126,21 @@ Paste WHEP (and stream key) into match setup / stream settings in the app.
 
 ### Backend (`backend/.env`)
 
-See **`backend/.env.example`**. Main keys:
+See **`backend/.env.example`**.
 
 | Variable | Purpose |
 |----------|---------|
 | `PORT` | API port (default `3001`) |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis URL |
-| `ADMIN_SECRET` | Secret for admin/scoring routes (must match frontend) |
-| `CORS_ORIGIN` | Comma-separated browser origins allowed for API |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Scorer login (defaults `admin` / `criccast`) |
+| `ADMIN_SECRET` | Signs admin JWTs — change in production |
+| `VIEWER_JWT_SECRET` | Signs viewer JWTs (defaults to `ADMIN_SECRET`) |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud (optional) |
+| `LIVEKIT_WEBHOOK_SECRET` | Webhook signing (optional; defaults to API secret) |
+| `CORS_ORIGIN` | Comma-separated browser origins |
+| `PUBLIC_APP_URL` | Base URL for invite links (e.g. `http://localhost:5173`) |
+| `SMTP_*`, `INVITE_EMAIL_FROM` | Optional email for room-guest invites |
 
 ### Frontend (`frontend/.env`)
 
@@ -115,10 +148,10 @@ See **`frontend/.env.example`**.
 
 | Variable | Purpose |
 |----------|---------|
-| `VITE_API_URL` | REST API base URL |
-| `VITE_WS_URL` | WebSocket URL (e.g. `ws://localhost:3001/ws`) |
-| `VITE_ADMIN_SECRET` | Same value as backend `ADMIN_SECRET` for gated admin UI |
-| `VITE_WEBRTC_ASSUMED_LATENCY_S` | Fallback overlay delay before RTC stats are available |
+| `VITE_API_URL` | REST API base (omit in dev — Vite proxy) |
+| `VITE_WS_URL` | WebSocket URL (omit in dev — Vite proxy) |
+| `VITE_ADMIN_SECRET` | _(Optional)_ legacy `X-Admin-Secret` header only |
+| `VITE_WEBRTC_ASSUMED_LATENCY_S` | Fallback overlay delay before RTC stats |
 
 **Do not commit** real `.env` files or production secrets.
 
@@ -130,31 +163,29 @@ See **`frontend/.env.example`**.
 |-----|---------|
 | `/` | Home — live / recent matches |
 | `/setup` | Create match + stream setup |
-| `/match/:matchId` | **Public viewer** (HLS + WebRTC + chat + overlays) |
-| `/admin/:matchId` | **Scoring** (admin gate; uses `VITE_ADMIN_SECRET`) |
+| `/watch/:matchId` | Viewer (HLS + WebRTC + chat + overlays); `/match/:id` redirects here |
+| `/admin/:matchId` | Scoring — sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` |
 
 ---
 
 ## Docker (API + DB)
 
-`backend/docker-compose.yml` can run **Postgres**, **Redis**, and optionally the **backend** container. It does **not** run MediaMTX or the Vite frontend.
+`backend/docker-compose.yml` runs **Postgres** and **Redis** (and optionally the API image). It does **not** run MediaMTX or the Vite frontend.
 
 ```bash
 cd backend
 docker compose up -d postgres redis
-# optional full stack with API image:
-# docker compose up -d
 ```
 
-**Note:** `@roamhq/wrtc` (WebRTC chat relay) may need a **glibc-based** Node image in Docker; if the backend container fails on native bindings, run the API with `npm run dev` on the host.
+**Note:** `@roamhq/wrtc` (WebRTC chat relay) may need a glibc-based Node image in Docker; if the backend container fails on native bindings, run `npm run dev` on the host.
 
 ---
 
 ## Chat (simple mental model)
 
-- **Preferred:** small **WebRTC DataChannel** per viewer to the Node server; server relays to others.  
-- **Fallback:** same **WebSocket** used for scores; messages go through **Redis** and fan out.  
-- **Not** the same connection as MediaMTX video (WHEP is only for A/V).
+- **With LiveKit:** chat uses LiveKit **data** packets in the match room.
+- **Without LiveKit:** small **WebRTC DataChannel** per viewer to Node, or **WebSocket + Redis** fallback.
+- MediaMTX **WHEP** is only for main broadcast A/V, not fan cam or chat.
 
 ---
 
@@ -169,55 +200,21 @@ docker compose up -d postgres redis
 
 ---
 
-## Publishing to GitHub
-
-Replace `YOUR_USER` / `YOUR_REPO` with your GitHub username and repository name.
-
-### 1. Create an empty repo on GitHub
-
-On [github.com/new](https://github.com/new): create a repository (e.g. `CricketCast`), **without** adding a README (this repo already has one).
-
-### 2. Initialize git and push (first time)
-
-From the **CricketCast** project root:
-
-```bash
-cd /path/to/CricketCast
-
-git init
-git add .
-git commit -m "Initial commit: CricCast cricket streaming and scoring platform"
-
-git branch -M main
-git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
-git push -u origin main
-```
-
-### 3. SSH remote (optional)
-
-```bash
-git remote set-url origin git@github.com:YOUR_USER/YOUR_REPO.git
-git push -u origin main
-```
-
-### 4. Later updates
+## Contributing / pushing updates
 
 ```bash
 git add .
-git status
-git commit -m "Describe your change in a short sentence."
-git push
+git commit -m "Describe your change."
+git push origin main
 ```
 
 ---
 
-## Suggested GitHub repository description
+## Suggested GitHub description
 
-**Short (for the GitHub “Description” field):**
+> Cricket live scoring + dual HLS/WebRTC viewer (MediaMTX), React, Node, Postgres, Redis — LiveKit fan cam, room guests, and realtime overlays.
 
-> Cricket live scoring + dual HLS/WebRTC viewer (MediaMTX), React, Node, Postgres, Redis — with WebRTC chat demo and WS fallback.
-
-**Topics / tags to add on GitHub:** `cricket`, `streaming`, `webrtc`, `hls`, `mediamtx`, `react`, `nodejs`, `redis`, `postgresql`, `live-sports`
+**Topics:** `cricket`, `streaming`, `webrtc`, `hls`, `mediamtx`, `livekit`, `react`, `nodejs`, `redis`, `postgresql`, `live-sports`
 
 ---
 

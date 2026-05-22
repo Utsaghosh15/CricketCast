@@ -11,6 +11,11 @@ const streamRouter = require('./routes/stream');
 const healthRouter = require('./routes/health');
 const matchDB = require('./db/matchDB');
 const { sendDbAwareError } = require('./utils/dbHttpError');
+const authViewerRouter = require('./routes/authViewer');
+const authAdminRouter = require('./routes/authAdmin');
+const livekitTokenRouter = require('./routes/livekitToken');
+const roomGuestsRouter = require('./routes/roomGuests');
+const { handleLivekitWebhook } = require('./routes/livekitWebhook');
 
 const { attachWebSocketServer } = require('./ws/wsServer');
 const { createWsHandler } = require('./ws/wsHandler');
@@ -33,7 +38,7 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Admin-Secret');
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
@@ -41,9 +46,18 @@ app.use((req, res, next) => {
   next();
 });
 
+app.post(
+  '/api/livekit/webhook',
+  express.raw({ type: '*/*', limit: '3mb' }),
+  handleLivekitWebhook
+);
+
 app.use(express.json({ limit: '1mb' }));
 
 app.use(healthRouter);
+
+app.use('/api/auth', authAdminRouter);
+app.use('/api/auth', authViewerRouter);
 
 app.get('/api/matches/live', async (req, res) => {
   try {
@@ -61,6 +75,8 @@ app.use('/api/match/:id', matchByIdRouter);
 app.use('/api/match/:id', ballRouter);
 app.use('/api/match/:id', overRouter);
 app.use('/api/match/:id', overlayRouter);
+app.use('/api/match/:id', livekitTokenRouter);
+app.use('/api/match/:id', roomGuestsRouter);
 app.use('/api/match/:id', streamRouter);
 
 app.use((err, _req, res, _next) => {

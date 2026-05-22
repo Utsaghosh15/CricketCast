@@ -37,7 +37,6 @@ webrtcAddress: :8889
 webrtcAllowOrigins: ['*']
 webrtcLocalUDPAddress: :8189
 webrtcIPsFromInterfaces: true
-# Add your Mac LAN IP so WebRTC works from phones (e.g. ['192.168.200.11'])
 webrtcAdditionalHosts: [192.168.1.163]
 
 pathDefaults:

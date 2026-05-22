@@ -86,7 +86,7 @@ export default function OverlayManager() {
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-[40] overflow-hidden">
       {renderBanner()}
       {renderCard()}
       <ScoreBug data={matchState} flashKey={scoreFlashKey} />

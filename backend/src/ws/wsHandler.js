@@ -3,8 +3,11 @@ const { WebSocket } = require('ws');
 const { getMatchState } = require('../engine/scoreEngine');
 const { publish } = require('../redis/publisher');
 const { createChatDataChannelRelay } = require('./chatDataChannelRelay');
+const { verifyViewerToken } = require('../utils/viewerJwt');
+const { verifyAdminToken } = require('../utils/adminJwt');
+const { redactMatchState, redactFanoutEnvelope } = require('../utils/redactMatchStreams');
 
-/** @typedef {{ ws: import('ws'), matchId: string, role: string, lastPong: number }} ClientMeta */
+/** @typedef {{ ws: import('ws'), matchId: string, role: string, lastPong: number, streamAllowed: boolean }} ClientMeta */
 
 /**
  * Create WebSocket handler state and helpers.
@@ -51,11 +54,11 @@ function createWsHandler(subscriptions) {
   function broadcast(matchId, payload) {
     const set = subscriptions.get(matchId);
     if (!set) return;
-    const raw = JSON.stringify(payload);
     for (const ws of set) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(raw);
-      }
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const allowed = meta.get(ws)?.streamAllowed;
+      const out = allowed ? payload : redactFanoutEnvelope(payload);
+      ws.send(JSON.stringify(out));
     }
   }
 
@@ -68,14 +71,30 @@ function createWsHandler(subscriptions) {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
     const matchId = url.searchParams.get('matchId') || '';
     const role = url.searchParams.get('role') || 'viewer';
-    meta.set(ws, { ws, matchId, role, lastPong: Date.now() });
-    console.log('[ws] connect', { matchId, role });
+    const viewerToken = url.searchParams.get('viewerToken') || '';
+    const adminToken = url.searchParams.get('adminToken') || '';
+    const adminSecret = (url.searchParams.get('adminSecret') || '').trim();
+    const expectedSecret = (process.env.ADMIN_SECRET || 'criccast').trim();
+    let streamAllowed = false;
+    if (viewerToken) {
+      const v = verifyViewerToken(viewerToken);
+      streamAllowed = !!(v && v.matchId === matchId);
+    }
+    if (!streamAllowed && adminToken && verifyAdminToken(adminToken)) {
+      streamAllowed = true;
+    }
+    if (!streamAllowed && adminSecret && adminSecret === expectedSecret) {
+      streamAllowed = true;
+    }
+    meta.set(ws, { ws, matchId, role, lastPong: Date.now(), streamAllowed });
+    console.log('[ws] connect', { matchId, role, streamAllowed });
 
     if (matchId) {
       subscribe(ws, matchId);
       try {
         const state = await getMatchState(matchId);
-        ws.send(JSON.stringify({ type: 'MATCH_STATE', data: state }));
+        const data = streamAllowed ? state : redactMatchState(state);
+        ws.send(JSON.stringify({ type: 'MATCH_STATE', data }));
       } catch (e) {
         console.error('[ws] initial state error', e.message);
         ws.send(JSON.stringify({ type: 'ERROR', error: 'Failed to load match state' }));
@@ -117,6 +136,8 @@ function createWsHandler(subscriptions) {
       if (m) m.lastPong = Date.now();
       return;
     }
+
+    /* --- Legacy in-room chat (RTC DataChannel relay + WebSocket Redis fan-out). Replaced by LiveKit data + room guests. Kept for reference. ---
     if (msg.type === 'DC_CHAT_OFFER' && typeof msg.sdp === 'string') {
       void chatRelay.handleOffer(ws, msg.sdp);
       return;
@@ -125,7 +146,6 @@ function createWsHandler(subscriptions) {
       void chatRelay.handleClientIce(ws, msg.candidate);
       return;
     }
-    /** WebSocket relay when RTC DataChannel is unavailable or still negotiating */
     if (msg.type === 'CHAT_MESSAGE') {
       const m = meta.get(ws);
       if (!m?.matchId) return;
@@ -154,6 +174,11 @@ function createWsHandler(subscriptions) {
         ts: Date.now(),
       };
       publish(`match:chat:${m.matchId}`, out).catch((e) => console.error('[ws chat]', e.message));
+      return;
+    }
+    --- end legacy chat --- */
+
+    if (msg.type === 'DC_CHAT_OFFER' || msg.type === 'DC_CHAT_CANDIDATE' || msg.type === 'CHAT_MESSAGE') {
       return;
     }
   }

@@ -4,26 +4,28 @@ const DISPLAY_LS = 'criccast-display-name'
 const QUICK_REACTIONS = ['👏', '🔥', '❤️', '😂', '⚡', '🏏']
 
 /**
- * Match chat delivered over RTCDataChannel; WebSocket is used only for SDP/ICE signalling.
+ * Match-room chat: server relays into LiveKit so every participant (and the host panel) sees the same feed.
  *
  * @param {{
- *   matchId: string
  *   messages: Array<{ id: string, displayName: string, text: string|null, emoji: string|null, ts: number }>
- *   wsConnected: boolean
- *   dcState: string
- *   dcError: string | null
- *   sendDc: ((payload: object) => boolean) | null
- *   sendWs: ((obj: object) => boolean) | null
+ *   viewerLoggedIn: boolean
+ *   lkConnected: boolean
+ *   lkConnecting: boolean
+ *   lkError: string
+ *   canPublish: boolean
+ *   sendLiveKit: (payload: { displayName: string, text?: string|null, emoji?: string|null }) => Promise<boolean>
+ *   onReconnectLiveKit: () => void
  * }} props
  */
 export default function LiveChat({
-  matchId,
   messages,
-  wsConnected,
-  dcState,
-  dcError,
-  sendDc,
-  sendWs,
+  viewerLoggedIn,
+  lkConnected,
+  lkConnecting,
+  lkError,
+  canPublish,
+  sendLiveKit,
+  onReconnectLiveKit,
 }) {
   const [text, setText] = useState('')
   const [displayName, setDisplayName] = useState(() => {
@@ -50,58 +52,45 @@ export default function LiveChat({
     if (el) el.scrollTop = el.scrollHeight
   }, [messages])
 
-  const dcReady = dcState === 'open' && !!sendDc
-  const wsRelayOk = !!(wsConnected && sendWs && matchId)
-  const canDeliver = !!(displayName.trim() && (dcReady || wsRelayOk))
-  const canCompose = !!(wsConnected && displayName.trim())
+  const canSend = viewerLoggedIn && !!displayName.trim()
 
-  const dispatchPayload = useCallback(
-    (payload) => {
-      if (dcReady && sendDc?.(payload)) return true
-      if (wsRelayOk && sendWs) {
-        return sendWs({
-          type: 'CHAT_MESSAGE',
-          matchId,
-          payload,
-        })
-      }
-      return false
-    },
-    [dcReady, sendDc, wsRelayOk, sendWs, matchId]
-  )
-
-  const sendText = () => {
+  const sendText = async () => {
     const t = text.trim()
     if (!t || !displayName.trim()) return
-    if (!dispatchPayload({ displayName: displayName.trim(), text: t, emoji: null })) return
-    setText('')
+    const ok = await sendLiveKit({ displayName: displayName.trim(), text: t, emoji: null })
+    if (ok) setText('')
   }
 
-  const sendReaction = (emoji) => {
+  const sendReaction = async (emoji) => {
     if (!displayName.trim()) return
-    dispatchPayload({ displayName: displayName.trim(), text: null, emoji })
+    await sendLiveKit({ displayName: displayName.trim(), text: null, emoji })
   }
 
   const statusLine = (() => {
-    if (!wsConnected) return 'Signalling offline — waiting for WebSocket…'
-    if (dcReady) return 'Sending over RTC DataChannel ✓'
-    if (dcState === 'connecting')
-      return 'Negotiating RTC DataChannel — you can type; messages send via WebSocket until the channel opens.'
-    if (dcState === 'failed')
-      return `RTC DataChannel unavailable (${dcError || 'failed'}) — using WebSocket relay.`
-    if (dcState === 'closed') return 'RTC DataChannel closed — using WebSocket relay.'
-    return wsRelayOk ? 'Using WebSocket relay for chat ✓' : 'Preparing chat…'
+    if (lkConnecting) return 'Connecting to LiveKit (tiles)…'
+    if (lkError) return `LiveKit: ${lkError}`
+    if (viewerLoggedIn && !lkConnected) return 'Chat: server relay — messages still go to the room. Reconnect LiveKit for video tiles.'
+    if (lkConnected && !canPublish)
+      return 'LiveKit tiles ✓ — if the host enabled your camera, permission refreshes automatically (or tap Reconnect LiveKit).'
+    if (lkConnected) return 'LiveKit tiles + chat ✓'
+    return 'Sign in with your invite to use chat.'
   })()
 
   return (
     <div className="mt-4 rounded-xl border border-[#1a2030] bg-[#0d1117] p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-[#e0e0e0]">Live chat (RTC + WS fallback)</span>
+        <span className="text-sm font-semibold text-[#e0e0e0]">Live chat (LiveKit room)</span>
+        <button
+          type="button"
+          onClick={onReconnectLiveKit}
+          className="text-[10px] text-[#00e5ff] underline"
+        >
+          Reconnect LiveKit
+        </button>
       </div>
       <p className="mb-3 text-[10px] leading-relaxed text-[#4a5568]">
-        Prefer RTC <code className="text-[#8899aa]">DataChannel</code> (Node <code className="text-[#8899aa]">@roamhq/wrtc</code>
-        relay) when negotiation succeeds; otherwise the same match WebSocket carries chat via Redis fan-out so you can always
-        send while connected.
+        Invited viewers and the scoring host see the same thread. Camera controls are in the highlighted bar above when
+        the host allows publishing.
       </p>
       <p className="mb-3 text-[10px] font-medium text-cyan-200/70">{statusLine}</p>
 
@@ -118,8 +107,8 @@ export default function LiveChat({
             <button
               key={e}
               type="button"
-              disabled={!canDeliver}
-              onClick={() => sendReaction(e)}
+              disabled={!canSend}
+              onClick={() => void sendReaction(e)}
               className="rounded-md border border-[#1a2030] bg-[#0a0a0f] px-2 py-1 text-base leading-none hover:border-[#00e5ff]/50 disabled:opacity-40"
               title="Send reaction"
             >
@@ -151,16 +140,16 @@ export default function LiveChat({
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && sendText()}
+          onKeyDown={(e) => e.key === 'Enter' && void sendText()}
           maxLength={500}
           placeholder="Message…"
-          disabled={!canCompose}
+          disabled={!canSend}
           className="min-w-0 flex-1 rounded-lg border border-[#1a2030] bg-[#0a0a0f] px-2 py-2 text-sm text-[#e0e0e0] outline-none focus:border-[#00e5ff] disabled:opacity-50"
         />
         <button
           type="button"
-          disabled={!canDeliver || !text.trim() || !displayName.trim()}
-          onClick={sendText}
+          disabled={!canSend || !text.trim() || !displayName.trim()}
+          onClick={() => void sendText()}
           className="shrink-0 rounded-lg bg-[#00e5ff] px-4 py-2 text-sm font-semibold text-[#0a0a0f] disabled:opacity-40"
         >
           Send

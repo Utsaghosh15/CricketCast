@@ -99,7 +99,7 @@ CREATE TABLE balls (
 CREATE TABLE batting_cards (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   innings_id UUID NOT NULL REFERENCES innings(id) ON DELETE CASCADE,
-  player_id UUID REFERENCES players(id),
+  player_id UUID REFERENCES players(id) ON DELETE CASCADE,
   runs INTEGER DEFAULT 0,
   balls INTEGER DEFAULT 0,
   fours INTEGER DEFAULT 0,
@@ -115,7 +115,7 @@ CREATE TABLE batting_cards (
 CREATE TABLE bowling_cards (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   innings_id UUID NOT NULL REFERENCES innings(id) ON DELETE CASCADE,
-  player_id UUID REFERENCES players(id),
+  player_id UUID REFERENCES players(id) ON DELETE CASCADE,
   overs INTEGER DEFAULT 0,
   balls INTEGER DEFAULT 0,
   maidens INTEGER DEFAULT 0,
@@ -140,3 +140,29 @@ CREATE INDEX idx_balls_innings_delivery ON balls(innings_id, delivery_number DES
 CREATE INDEX idx_balls_innings_over ON balls(innings_id, over_number, ball_number);
 CREATE INDEX idx_players_match ON players(match_id);
 CREATE INDEX idx_innings_match ON innings(match_id);
+
+-- LiveKit room guests (invite email + temp password; admin toggles can_publish for camera/screen)
+CREATE TABLE match_room_guests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  password_hash TEXT NOT NULL,
+  display_name VARCHAR(80),
+  can_publish BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (match_id, email)
+);
+
+CREATE INDEX idx_room_guests_match ON match_room_guests(match_id);
+
+-- LiveKit webhook audit + latest presence per participant identity
+CREATE TABLE livekit_presence_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  participant_identity VARCHAR(255) NOT NULL,
+  event_type VARCHAR(40) NOT NULL,
+  payload JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_livekit_presence_match ON livekit_presence_log(match_id, created_at DESC);

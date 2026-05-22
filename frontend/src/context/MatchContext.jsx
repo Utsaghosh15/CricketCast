@@ -4,10 +4,18 @@ import { useMatchData } from '../hooks/useMatchData'
 const MatchContext = createContext(null)
 
 /**
- * @param {{ children: import('react').ReactNode, matchId: string }} props
+ * @param {{
+ *   children: import('react').ReactNode
+ *   matchId: string
+ *   matchAudience?: 'public' | 'viewer' | 'admin'
+ *   viewerAuthToken?: string
+ * }} props
  */
-export function MatchProvider({ children, matchId }) {
-  const { state, loading, error, refetch, setState } = useMatchData(matchId)
+export function MatchProvider({ children, matchId, matchAudience = 'public', viewerAuthToken = '' }) {
+  const { state, loading, error, refetch, setState } = useMatchData(matchId, {
+    matchAudience,
+    viewerAuthToken,
+  })
 
   const updateFromServer = useCallback(
     (next) => {

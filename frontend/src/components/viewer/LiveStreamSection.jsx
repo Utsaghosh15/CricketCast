@@ -9,9 +9,9 @@ import PlaybackVideoSurface from './PlaybackVideoSurface'
  * Dual viewers: HLS + WebRTC side by side; score overlays align to WebRTC (low-latency) timing.
  * Telemetry is shown in a card below the videos (not overlaid on picture).
  *
- * @param {{ hlsUrl: string, whepUrl: string }} props
+ * @param {{ hlsUrl: string, whepUrl: string, webrtcFanLayers?: import('react').ReactNode }} props
  */
-export default function LiveStreamSection({ hlsUrl, whepUrl }) {
+export default function LiveStreamSection({ hlsUrl, whepUrl, webrtcFanLayers = null }) {
   const { setCurrentLatency } = useStream()
   const hls = useHLS(hlsUrl || null, {})
   const rtc = useWebRTCWhep(whepUrl || null, { setStreamLatency: setCurrentLatency })
@@ -46,6 +46,7 @@ export default function LiveStreamSection({ hlsUrl, whepUrl }) {
             idleLabel="No WHEP URL"
           />
           <OverlayManager />
+          {webrtcFanLayers}
         </div>
       </div>
 

@@ -24,7 +24,7 @@ function MatchCard({ m, showPulse }) {
 
   return (
     <Link
-      to={`/match/${m.id}`}
+      to={`/watch/${m.id}`}
       className="block rounded-xl border border-[#1a2030] bg-[#0d1117] p-4 text-left transition hover:border-[#00e5ff]/40"
     >
       <div className="flex items-start justify-between gap-2">
